@@ -21,10 +21,12 @@ def main():
 
         controller = int(input("Zadaj vyber: "))
         if controller == 1:
-            transmitter()
+            continue
         if controller == 2:
-            receiver()
+            continue
 
+def generate_random_number():
+    return 42069
 
 if __name__ == "__main__":
-    main()
+    print(f"Random port number is: {generate_random_number()}")
