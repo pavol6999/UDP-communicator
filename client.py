@@ -2,8 +2,8 @@ import libscrc
 import socket
 import struct
 import os
-
-from crcmod import crcmod
+import time
+import threading
 
 
 def ip_input():
@@ -17,6 +17,13 @@ def ip_input():
             ip_addr = input("Please enter a valid IP address: ")
 
     return ip_addr
+
+
+def keep_alive_sender(keep_alive_status, host_addr, host_port, c_socket):
+    while keep_alive_status.isSet():
+        c_socket.sendto("K".encode('ascii'), (host_addr, host_port))
+        print("Keep alive was sent")
+        time.sleep(5)
 
 
 def port_input():
@@ -80,7 +87,7 @@ def add_headers(chopped_bytes, data_type):
     fragments = []
 
     for data in chopped_bytes:
-        fragments.append(struct.pack("! c h", data_type.encode('ascii'), i + 1) + data)
+        fragments.append(struct.pack("! c h", data_type.encode('ascii'), i) + data)
         fragments[i] += struct.pack("! I", calculate_crc(fragments[i]))
         i += 1
     return fragments, i
@@ -119,6 +126,7 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
 
 
 def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
+
     file_name = 0
 
     if data_type.upper() == "M":
@@ -168,22 +176,28 @@ def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
     while len(fragments) != 0:
         fragment = fragments.pop(0)
 
+        # klient sa pokusi poslat fragment na server
         while num_of_tries != 3:
-            c_socket.settimeout(5)
-            c_socket.sendto(fragment, (host_addr, host_port))
 
+            c_socket.settimeout(3)
+            if num_of_tries == 2:
+                c_socket.sendto(fragment, (host_addr, host_port))
+
+            # ak prisla odpoved zo servera
             try:
                 data, addr = c_socket.recvfrom(2048)
 
+                # ak to bolo ack tak pozrieme ci bolo chybne alebo nie
                 if data[0:1].decode('ascii') == 'A':
                     if len(data) == 1:
                         num_of_tries = 0
                         c_socket.settimeout(None)
                         break
                     else:
-                        c_socket.sendto(fragment, (host_addr, host_port))
+                        print("The fragment was corrupted, resending fragment")
+                        continue
 
-
+            # ak klient timeoutne, takze fragment sa stratil, tak pokusi poslat fragment este raz
             except socket.timeout:
                 num_of_tries += 1
 
@@ -191,6 +205,15 @@ def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
                     print("Connection unstable, disconnecting")
                     client_init()
                 print(f"Retransmitting fragment for the {num_of_tries}. time")
+
+    keep_alive_status = threading.Event()
+    keep_alive_status.set()
+    ka_thread = threading.Thread(target=keep_alive_sender, args=(keep_alive_status, host_addr, host_port, c_socket), daemon=True)
+    ka_thread.start()
+
+
+    time.sleep(20)
+    keep_alive_status.set()
 
 
 def input_file_path():
