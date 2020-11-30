@@ -5,6 +5,8 @@ import os
 import time
 import threading
 
+client_socket = None
+server_socket = None
 
 def ip_input():
     ip_addr = input("Enter the IP adress of the receiver: ")
@@ -21,8 +23,7 @@ def ip_input():
 
 def keep_alive_sender(keep_alive_status, host_addr, host_port, c_socket):
     while keep_alive_status.isSet():
-        c_socket.sendto("K".encode('ascii'), (host_addr, host_port))
-        print("Keep alive was sent")
+        c_socket.sendto("K".encode('utf-8'), (host_addr, host_port))
         time.sleep(5)
 
 
@@ -50,7 +51,7 @@ def initialize_connection(host_addr, host_port, frag_size, c_sock):
         try:
             data, addr = c_sock.recvfrom(1500)
             if struct.unpack("! c", data[:1]):
-                print(f"Connection initialized with {addr[0]} on port {addr[1]}")
+                print(f"\nConnection initialized with {addr[0]} on port {addr[1]}")
                 break
         except socket.timeout:
 
@@ -65,9 +66,18 @@ def initialize_connection(host_addr, host_port, frag_size, c_sock):
 def chop_data(byte_str, frag_size):
     fragments_q = []
     start = 0
-    end = frag_size
+    fragment_size = frag_size
+    if len(byte_str)/frag_size > 65535:
+        print("Number of fragments is larger than the max, that can fit into 2 bytes")
+        print(f"The fragment size was set for this file to {len(byte_str)//65535 + 1}")
+        fragment_size = len(byte_str)//65535 + 1
+
+    end = fragment_size
+
+
+
     while True:
-        if start + frag_size > len(byte_str):
+        if start + fragment_size > len(byte_str):
             end = len(byte_str)
 
             # ak je dlzka byte stringu MOD fragment_size 0, tak neukladaj
@@ -77,8 +87,9 @@ def chop_data(byte_str, frag_size):
             break
         else:
             fragments_q.append(byte_str[start:end])
-            start += frag_size
-            end += frag_size
+            start += fragment_size
+            end += fragment_size
+
     return fragments_q
 
 
@@ -87,7 +98,7 @@ def add_headers(chopped_bytes, data_type):
     fragments = []
 
     for data in chopped_bytes:
-        fragments.append(struct.pack("! c h", data_type.encode('ascii'), i) + data)
+        fragments.append(struct.pack("! c H", data_type.encode('utf-8'), i) + data)
         fragments[i] += struct.pack("! I", calculate_crc(fragments[i]))
         i += 1
     return fragments, i
@@ -100,10 +111,10 @@ def calculate_crc(fragment):
 def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file_name):
     i = 0
     if data_type == 'M':
-        info_packet = struct.pack("!c h", data_type.encode('ascii'), frag_count)
+        info_packet = struct.pack("!c H", data_type.encode('utf-8'), frag_count)
 
     if data_type == 'F':
-        info_packet = struct.pack("!c h", data_type.encode('ascii'), frag_count) + file_name.encode('ascii')
+        info_packet = struct.pack("!c H", data_type.encode('utf-8'), frag_count) + file_name.encode('utf-8')
 
     i = 0
 
@@ -112,8 +123,8 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
         c_socket.sendto(info_packet, (host_addr, host_port))
         try:
             data, addr = c_socket.recvfrom(2048)
-            if data[0:1].decode('ascii') == 'A':
-                print(f"Bude odoslany subor {file_name}") if data_type == 'F' else print("Bude odoslana sprava")
+            if data[0:1].decode('utf-8') == 'A':
+                print(f"{file_name} will be sent") if data_type == 'F' else print("A message will be sent")
 
                 break
         except socket.timeout:
@@ -125,19 +136,19 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
     return 1
 
 
-def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
-
+def transmit_data(host_addr, host_port, frag_size, data_type):
+    c_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     file_name = 0
 
     if data_type.upper() == "M":
         data_type = data_type.upper()
-        byte_str = input("Enter the message you want to send: ").encode('ascii')
+        byte_str = input("Enter the message you want to send: ").encode('utf-8')
 
     if data_type.upper() == "F":
         data_type = data_type.upper()
         file_path = input_file_path()
         file_name = os.path.basename(file_path)
-        print(f"File {file_name} is going to be send to the receiver")
+        print(f"File {file_name} is going to be sent to the receiver")
         byte_str = open(file_path, "rb").read()
 
     chopped_data = chop_data(byte_str, frag_size)
@@ -150,45 +161,30 @@ def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
     if init != 0:
         send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file_name)
 
-    counter = 0
-    bulk_count = 0
-    left_to_send = frag_count
-    frag_indexes = []
-    index = 0
-
-    # while len(fragments) != 0:
-    #     while bulk_count < 9 and len(fragments) > 0:
-    #         fragment = fragments.pop(0)
-    #         c_socket.sendto(fragment, (host_addr, host_port))
-    #         frag_indexes.append((bulk_count,fragment))
-    #
-    #         bulk_count += 1
-    #     c_socket.settimeout(5)
-    #     data = c_socket.recvfrom(2048)
-    #     while True:
-    #         try:
-    #             data
-    #         except:
-    #             print("")
-
     num_of_tries = 0
 
     while len(fragments) != 0:
         fragment = fragments.pop(0)
-
+        error = 0
         # klient sa pokusi poslat fragment na server
         while num_of_tries != 3:
 
             c_socket.settimeout(3)
-            if num_of_tries == 2:
-                c_socket.sendto(fragment, (host_addr, host_port))
+            # if error == 0:
+            #
+            #     fragment2 = bytearray(fragment)
+            #     fragment2[4] += 1
+            #     error = 1
+            #     c_socket.sendto(fragment2, (host_addr, host_port))
+            # else:
+            c_socket.sendto(fragment, (host_addr, host_port))
 
             # ak prisla odpoved zo servera
             try:
                 data, addr = c_socket.recvfrom(2048)
 
                 # ak to bolo ack tak pozrieme ci bolo chybne alebo nie
-                if data[0:1].decode('ascii') == 'A':
+                if data[0:1].decode('utf-8') == 'A':
                     if len(data) == 1:
                         num_of_tries = 0
                         c_socket.settimeout(None)
@@ -212,8 +208,8 @@ def transmit_data(host_addr, host_port, frag_size, data_type, c_socket):
     ka_thread.start()
 
 
-    time.sleep(20)
-    keep_alive_status.set()
+
+    end_transmission(host_addr,host_port, keep_alive_status)
 
 
 def input_file_path():
@@ -227,18 +223,32 @@ def input_file_path():
 
     return file_path
 
+def end_transmission(host_addr, host_port, keep_alive_status):
 
-def client_init():
+
+
+    controller = input("1 - Keep sending data to server \n2 - Change to server")
+    if controller == 1:
+        frag_size = int(input("Fragment size: "))
+        data_type = input("Message or File (m - f): ")
+        keep_alive_status.clear()
+        transmit_data(host_addr,host_port,frag_size,data_type)
+    else:
+
+
+
+def client_init(connected):
+
     host_addr = ip_input()
     host_port = port_input()
 
     frag_size = int(input("Fragment size: "))
-    data_type = input("Message or File (m - f): ")  # TODO check data type
+    data_type = input("Message or File (m - f): ")
 
-    c_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    transmit_data(host_addr, host_port, frag_size, data_type, c_sock)
+
+    transmit_data(host_addr, host_port, frag_size, data_type)
 
 
 if __name__ == "__main__":
-    client_init()
+    client_init(False)

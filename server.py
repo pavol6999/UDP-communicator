@@ -12,12 +12,10 @@ def unpack_data(fragment):
     return frag_type,frag_count,data,crc
 
 def server_listen(port, s_socket):
-    BUF_SIZE = 1500
 
-    connected_user = False
     s_socket.settimeout(None)
     while True:
-        print(f"######## SERVER IS LISTENING ON PORT {port} ########")
+        print(f"\n######## SERVER IS LISTENING ON PORT {port} ########")
 
         while True:
             try:
@@ -25,26 +23,26 @@ def server_listen(port, s_socket):
                 data, addr = s_socket.recvfrom(1500)
 
                 processed_packet_type = struct.unpack("! c", data[:1])[0]
-                if processed_packet_type.decode('ascii') == "I":
+                if processed_packet_type.decode('utf-8') == "I":
                     print(f"Connection initialized by {addr[0]}")
                     s_socket.sendto(data, addr)
 
-                if processed_packet_type.decode('ascii') == 'M':
+                if processed_packet_type.decode('utf-8') == 'M':
                     frag_type = "M"
-                    frag_count = struct.unpack("!h",data[1:3])[0]
+                    frag_count = struct.unpack("!H",data[1:3])[0]
                     print(f"A message will be received consisting of {frag_count} fragments")
-                    s_socket.sendto("A".encode('ascii'),addr)
+                    s_socket.sendto("A".encode('utf-8'),addr)
                     break
 
-                if processed_packet_type.decode('ascii') == 'F':
+                if processed_packet_type.decode('utf-8') == 'F':
                     frag_type = "F"
-                    frag_count = struct.unpack("!h",data[1:3])[0]
-                    file_name = data[3:].decode('ascii')
-                    s_socket.sendto("A".encode('ascii'), addr)
+                    frag_count = struct.unpack("!H",data[1:3])[0]
+                    file_name = data[3:].decode('utf-8')
+                    s_socket.sendto("A".encode('utf-8'), addr)
                     print(f"A file {file_name} will be received consisting of {frag_count} fragments")
                     break
 
-                if processed_packet_type.decode('ascii') == 'K':
+                if processed_packet_type.decode('utf-8') == 'K':
                     print("The connection is alive")
 
             except socket.timeout:
@@ -64,22 +62,48 @@ def server_listen(port, s_socket):
                 key = struct.unpack("! h", data[1:3])[0]
                 if check_crc(data):
                     received_fragments[key] = data[3:-4]
-                    s_socket.sendto('A'.encode('ascii'),addr)
+                    s_socket.sendto('A'.encode('utf-8'),addr)
                     received_num+=1
                 else:
-                    s_socket.sendto('A'.encode('ascii')+key.to_bytes(2, "big"), addr)
+                    print(f"Corrupted data on fragment {received_num}")
+                    s_socket.sendto('A'.encode('utf-8')+key.to_bytes(2, "big"), addr)
                     continue
 
             except socket.timeout:
                 print(f"Connection unstable")
 
+        if frag_type == 'F':
+            message = reconstruct_file(received_fragments,file_name)
+            print(f"File was saved to {message}")
+
+        if frag_type == 'M':
+            message = reconstruct_message(received_fragments)
+            print(f"Message: {message}")
 
         s_socket.settimeout(30)
-        print("")
 
 
 
 
+def reconstruct_file(received_fragments, file_name):
+    file = open(f"Download/{file_name}", "wb")
+    b_string = b''
+    values = received_fragments.values()
+    for value in values:
+        try:
+            b_string += value
+        except TypeError:
+            break
+    file.write(b_string)
+    file.close()
+    return f"Downloads/{file_name}"
+
+def reconstruct_message(received_fragments):
+    values = received_fragments.values()
+    message = b''
+    for value in values:
+        message += value
+    return message.decode('utf-8')
 
 
 
