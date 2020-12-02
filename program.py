@@ -6,8 +6,6 @@ import time
 import threading
 
 
-corrupted = missing = 0
-
 # zadanie ip adresy
 def ip_input():
     ip_addr = input("Enter the IP adress of the receiver: ")
@@ -21,7 +19,6 @@ def ip_input():
     return ip_addr
 
 
-
 # posielac keep alive sprav, caka na ack ci je server respondivny
 def keep_alive_sender(keep_alive_status, host_addr, host_port, c_socket):
     while keep_alive_status.isSet():
@@ -32,7 +29,8 @@ def keep_alive_sender(keep_alive_status, host_addr, host_port, c_socket):
         else:
             print("Server not responding")
 
- # osetrenie port vstupu
+
+# osetrenie port vstupu
 def port_input():
     port = int(input("Enter port: "))
     while True:
@@ -44,6 +42,7 @@ def port_input():
         except ValueError:
             port = int(input("Please enter a valid port nubmer: "))
     return port
+
 
 # inicializacia spojenia
 def initialize_connection(host_addr, host_port, c_sock):
@@ -69,6 +68,7 @@ def initialize_connection(host_addr, host_port, c_sock):
                 return 0
     return 1
 
+
 # nasekame byte_string na fragmenty o velkosti len(hlavicka) + data
 def chop_data(byte_str, frag_size):
     fragments_q = []
@@ -84,8 +84,6 @@ def chop_data(byte_str, frag_size):
         fragment_size = len(byte_str) // 65535 + 1
 
     end = fragment_size
-
-
 
     # postupna iteracia byte stringom a rozdelenim ho do fragmentov
     while True:
@@ -104,6 +102,7 @@ def chop_data(byte_str, frag_size):
 
     return fragments_q
 
+
 # prida hlavicky na fragmenty
 def add_headers(chopped_bytes, data_type):
     i = 0
@@ -119,11 +118,12 @@ def add_headers(chopped_bytes, data_type):
 def calculate_crc(fragment):
     return libscrc.fsc(fragment)
 
- # posle prvy fragment, ktore sluzia ako metadata pre posielane data
- # ak je prenasana sprava, posle sa typ M, pocet fragmentov kolko bude prenasanych
- # ak je prenasany subor, posle sa typ F, pocet fragmentvo a nazov suboru
+
+# posle prvy fragment, ktore sluzia ako metadata pre posielane data
+# ak je prenasana sprava, posle sa typ M, pocet fragmentov kolko bude prenasanych
+# ak je prenasany subor, posle sa typ F, pocet fragmentvo a nazov suboru
 def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file_name):
-    i = 0
+
     if data_type == 'M':
         info_packet = struct.pack("!c H", data_type.encode('utf-8'), frag_count)
 
@@ -131,7 +131,6 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
         info_packet = struct.pack("!c H", data_type.encode('utf-8'), frag_count) + file_name.encode('utf-8')
 
     i = 0
-
 
     # skusim trikrat poslat info packet, ak pride odpoved breaknem loop
     # ak nie, tak je moznost ze sa info packet stratil po ceste a tak ho skusim poslat znovu
@@ -142,7 +141,8 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
         try:
             data, addr = c_socket.recvfrom(2048)
             if data[0:1].decode('utf-8') == 'A':
-                print(f"{file_name} will be sent") if data_type == 'F' else print("A message will be sent")
+                print(f"{file_name} will be sent, chopped to {frag_count} fragments") if data_type == 'F' else print(
+                    f"A message will be sent, chopped to {frag_count} fragments")
 
                 break
         except socket.timeout:
@@ -152,6 +152,7 @@ def send_info_packet(host_addr, host_port, c_socket, data_type, frag_count, file
                 client_init(0)
                 return 0
     return 1
+
 
 def add_error():
     missing = corrupted = False
@@ -174,9 +175,20 @@ def add_error():
     return missing, corrupted
 
 
-# hlavna funkcia, ktora prenasa udaje
-def transmit_data(host_addr, host_port, frag_size, data_type, client_socket):
+def input_fragment_size():
+    size = int(input("Fragment size: "))
+    while True:
+        if 0 < size <= 1465:
+            break
+        else:
+            size = int(input("Enter valid fragment size (1 - 1465): "))
+    return size
 
+
+# hlavna funkcia, ktora prenasa udaje
+def transmit_data(host_addr, host_port, client_socket):
+    frag_size = input_fragment_size()
+    data_type = input("Message or File (m - f): ")
     # ak este nebol  nastaveny socket tak sa vytvori novy
     if client_socket == 0:
         c_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -190,20 +202,16 @@ def transmit_data(host_addr, host_port, frag_size, data_type, client_socket):
     # premenne ktore predstavuju pocet chyb
     missing, corrupted = add_error()
 
-
-
     # ak chceme poslat spravu, tak zadame spravu
     if data_type.upper() == "M":
         data_type = data_type.upper()
         byte_str = input("Enter the message you want to send: ").encode('utf-8')
-
 
     # ak chceme poslat subor, tak zadame nazov suboru
     if data_type.upper() == "F":
         data_type = data_type.upper()
         file_path = input_file_path()
         file_name = os.path.basename(file_path)
-        print(f"File {file_name} is going to be sent to the receiver")
         byte_str = open(file_path, "rb").read()
 
     # posekame string na fragmenty
@@ -239,7 +247,7 @@ def transmit_data(host_addr, host_port, frag_size, data_type, client_socket):
                 try:
                     corrupted_fragment[-1] += 1
                 except:
-                    corrupted_fragment[-1] -=1
+                    corrupted_fragment[-1] -= 1
                 corrupted_fragment = bytes(corrupted_fragment)
                 c_socket.sendto(corrupted_fragment, (host_addr, host_port))
                 corrupted = False
@@ -270,7 +278,6 @@ def transmit_data(host_addr, host_port, frag_size, data_type, client_socket):
                     client_init(0)
                 print(f"Retransmitting fragment for the {num_of_tries}. time")
 
-
     # po ukonceni posielania suboru/spravy, vytvorim novy thread, ktory posiela keep alive spravy
     keep_alive_status = threading.Event()
     keep_alive_status.set()
@@ -279,6 +286,7 @@ def transmit_data(host_addr, host_port, frag_size, data_type, client_socket):
     ka_thread.start()
 
     end_transmission(host_addr, host_port, keep_alive_status, c_socket)
+
 
 # zadanie validnej cesty k suboru
 def input_file_path():
@@ -292,17 +300,18 @@ def input_file_path():
 
     return file_path
 
+
 # koniec prenosu suboru, otvori sa menu ci chce klient stale posielat subory na server alebo chce so serverom switchnut role
 def end_transmission(host_addr, host_port, keep_alive_status, c_socket):
-    controller = input("1 - Keep sending data to server \n2 - Change to server")
+    controller = input("\n1 - Keep sending data to server \n2 - Change to server\nOption: ")
     if controller == '1':
-        frag_size = int(input("Fragment size: "))
-        data_type = input("Message or File (m - f): ")
+
         keep_alive_status.clear()
-        transmit_data(host_addr, host_port, frag_size, data_type, c_socket)
+        transmit_data(host_addr, host_port, c_socket)
     else:
         keep_alive_status.clear()
         switch_role(c_socket, host_addr, host_port)
+
 
 # odosle sa na server sprava S - switch, tne spracuje spravu a nastavi sa na odosielanie
 # klient sa pripravi na odosielanie
@@ -311,28 +320,21 @@ def switch_role(c_socket, host_addr, host_port):
 
     server_init(c_socket)
 
+
 # priprava klienta, zada sa ip adresa a port na ktory chceme posielat subory/spravy
 def client_init(client_socket):
     host_addr = ip_input()
     host_port = port_input()
 
-    frag_size = int(input("Fragment size: "))
-    data_type = input("Message or File (m - f): ")
-    transmit_data(host_addr, host_port, frag_size, data_type, client_socket)
+    transmit_data(host_addr, host_port, client_socket)
 
 
 def check_crc(fragment):
     return True if libscrc.fsc(fragment) == 0 else False
 
 
-
-
-
-
-
 # hlavna funkcia pre server
 def server_listen(port, s_socket):
-
     # ak prvykrat nastavime socket server a zapneme tak pocuva,
     # timeout nepotrebuje lebo este nikto nie je pripojeny
     s_socket.settimeout(None)
@@ -345,11 +347,11 @@ def server_listen(port, s_socket):
 
                 data, addr = s_socket.recvfrom(1500)
 
-
                 # ak sa chce pripojit klient
                 processed_packet_type = struct.unpack("! c", data[:1])[0]
                 if processed_packet_type.decode('utf-8') == "I":
                     print(f"Connection initialized by {addr[0]}")
+                    s_socket.settimeout(20)
                     s_socket.sendto(data, addr)
 
                 # ak pride sprava
@@ -372,12 +374,13 @@ def server_listen(port, s_socket):
                 # ak pride keep alive packet
                 if processed_packet_type.decode('utf-8') == 'K':
                     print("The connection is alive")
-                    s_socket.sendto("A".encode('utf-8'),addr)
+                    s_socket.sendto("A".encode('utf-8'), addr)
 
                 # ked pride switch tak sa server pusti funckiu client_init na pripravu na prijmanie suborov
                 if processed_packet_type.decode('utf-8') == 'S':
                     print("\nSwitching to client")
-                    client_init(s_socket)
+                    s_socket.settimeout(None)
+                    transmit_data(addr[0], addr[1], s_socket)
 
 
 
@@ -407,26 +410,24 @@ def server_listen(port, s_socket):
                 # ak su data poskodene, tak neulozim fragment a odoslem ack s cislom poskodeneho fragmentu
                 else:
                     print(f"Corrupted data on fragment {received_num}")
-                    s_socket.sendto('E'.encode('utf-8'),addr)
+                    s_socket.sendto('E'.encode('utf-8'), addr)
                     continue
 
             except socket.timeout:
-                print(f"Connection unstable, a packet was lost")
-                s_socket.sendto('E'.encode('utf-8'),addr)
-
+                print(f"Connection unstable, a packet was lost ({received_num})")
+                s_socket.sendto('E'.encode('utf-8'), addr)
 
         # dalej sa rozhodujem ci ulozim subor, alebo zobrazim spravu
         if frag_type == 'F':
             message = reconstruct_file(received_fragments, file_name)
             print(f"File was saved to {message}")
 
-
-
         if frag_type == 'M':
             message = reconstruct_message(received_fragments)
             print(f"Message: {message}")
 
         s_socket.settimeout(30)
+
 
 # rekonstrukcia suboru, vrati cestu k ulozenemu suboru
 def reconstruct_file(received_fragments, file_name):
@@ -442,6 +443,7 @@ def reconstruct_file(received_fragments, file_name):
     file.close()
     return f"Downloads/{file_name}"
 
+
 # rekonstrukcia spravy
 def reconstruct_message(received_fragments):
     values = received_fragments.values()
@@ -449,6 +451,7 @@ def reconstruct_message(received_fragments):
     for value in values:
         message += value
     return message.decode('utf-8')
+
 
 # priprava serveru, ak je server_socket 0, teda este nenastaveny tak sa nastavi novy, ak uz socket bol
 # spraveny, vyuzije sa ten
@@ -468,9 +471,9 @@ def server_init(server_socket):
 def main():
     controller = 0
     while controller != 3:
-        print("1 - odosielatel\n2 - prijmatel\n3 - koniec")
+        print("1 - Client\n2 - Server\n3 - end")
 
-        controller = int(input("Zadaj vyber: "))
+        controller = int(input("Option: "))
         if controller == 1:
             client_init(0)
         if controller == 2:
